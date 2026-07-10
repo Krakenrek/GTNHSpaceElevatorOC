@@ -4,9 +4,9 @@ local sides = require("sides")
 
 local vector = require("vector")
 
-local self = {}
+local mining = {}
 
-self.static = {
+mining.static = {
     module_name = "projectmoduleminert",
     drone_name = "gtnhintergalactic:item.MiningDrone",
     voltage_names = {"LV", "MV", "HV", "EV", "IV", "LuV", "ZPM", "UV", "UHV", "UEV", "UIV", "UMV", "UXV"},
@@ -59,11 +59,11 @@ self.static = {
     }
 }
 
-self.runtime = {}
+mining.runtime = {}
 
 -- ====================== MANAGEMENT =======================
 
-function self.reset(module)
+function mining.reset(module)
     module.proxy.setWorkAllowed(false)
 
     module.me_interface.setInterfaceConfiguration()
@@ -71,9 +71,9 @@ function self.reset(module)
     module.transposer.transferItem(sides.top, sides.bottom, 1, 1, 1)
 end
 
-function self.apply(module, config)
+function mining.apply(module, config)
     module.me_interface.setInterfaceConfiguration({
-        name = self.static.drone_name,
+        name = mining.static.drone_name,
         damage = config.drone_tier - 1
     })
 
@@ -88,27 +88,27 @@ function self.apply(module, config)
     module.proxy.setWorkAllowed(true)
 end
 
-function self.reset_all()
-    for _, module in ipairs(self.runtime.modules) do
-        self.reset(module)
+function mining.reset_all()
+    for _, module in ipairs(mining.runtime.modules) do
+        mining.reset(module)
     end
 end
 
 -- ====================== CACHING =======================
 
-function self.create_range_pools()
+function mining.create_range_pools()
     local range_pools = {}
 
     local critical_distances = {}
 
-    for _, meteor in ipairs(self.static.meteors) do
+    for _, meteor in ipairs(mining.static.meteors) do
         critical_distances[meteor.min_distance] = true;
         critical_distances[meteor.max_distance + 1] = true;
     end
 
     for distance,  _ in pairs(critical_distances) do
         range_pools[distance] = {}
-        for _, meteor in ipairs(self.static.meteors) do
+        for _, meteor in ipairs(mining.static.meteors) do
             if meteor.min_distance > distance or meteor.max_distance < distance then
                 goto continue
             end
@@ -120,17 +120,17 @@ function self.create_range_pools()
     return range_pools
 end
 
-function self.calculate_effective_size(min_drone_tier, min_size, max_size, drone_tier)
-    local lambda = self.static.size_bonus[self.runtime.plasma_tier]
+function mining.calculate_effective_size(min_drone_tier, min_size, max_size, drone_tier)
+    local lambda = mining.static.size_bonus[mining.runtime.plasma_tier]
     return min_size + lambda * (max_size - min_size) + 2 ^ (drone_tier - min_drone_tier) - 1
 end
 
-function self.calculate_effective_duration(min_drone_tier, base_duration, drone_tier)
-    local lambda = 1 - self.static.time_discount[self.runtime.plasma_tier]
+function mining.calculate_effective_duration(min_drone_tier, base_duration, drone_tier)
+    local lambda = 1 - mining.static.time_discount[mining.runtime.plasma_tier]
     return base_duration * lambda / math.sqrt(drone_tier - min_drone_tier + 1)
 end
 
-function self.calculate_yield(pool, module_tier, drone_tier)
+function mining.calculate_yield(pool, module_tier, drone_tier)
     local yield = {}
     local time = 0.0
 
@@ -142,14 +142,14 @@ function self.calculate_yield(pool, module_tier, drone_tier)
             goto continue
         end
 
-        local size = self.calculate_effective_size(
+        local size = mining.calculate_effective_size(
             meteor.min_drone_tier,
             meteor.min_size,
             meteor.max_size,
             drone_tier
         )
 
-        local duration = self.calculate_effective_duration(
+        local duration = mining.calculate_effective_duration(
             meteor.min_drone_tier,
             meteor.duration,
             drone_tier
@@ -168,36 +168,36 @@ function self.calculate_yield(pool, module_tier, drone_tier)
     return vector.divide(yield, time)
 end
 
-function self.load_cache()
+function mining.load_cache()
     local cache = {}
 
-    local range_pools = self.create_range_pools()
+    local range_pools = mining.create_range_pools()
 
     for module_tier = 1,3 do
         cache[module_tier] = {}
         for drone_tier = 1,13 do
             cache[module_tier][drone_tier] = {}
             for distance, pool in pairs(range_pools) do
-                local yield = self.calculate_yield(pool, module_tier, drone_tier)
+                local yield = mining.calculate_yield(pool, module_tier, drone_tier)
                 if yield == nil then
                     goto continue
                 end
                 cache[module_tier][drone_tier][distance] = vector.multiply(
                     yield,
-                    self.runtime.delta * self.static.ticks_per_second
+                    mining.runtime.delta * mining.static.ticks_per_second
                 )
                 ::continue::
             end
         end
     end
 
-    self.runtime.cache = cache
+    mining.runtime.cache = cache
 end
 
 
 -- ====================== SETUP =======================
 
-function self.load_modules(config)
+function mining.load_modules(config)
     local modules = {}
     local modules_by_tier = {{}, {}, {}}
 
@@ -213,7 +213,7 @@ function self.load_modules(config)
 
         local name = proxy.getName()
         for i = 1,3 do
-            if name ~= self.static.module_name .. i then
+            if name ~= mining.static.module_name .. i then
                 goto continue
             end
             tier = i
@@ -252,11 +252,11 @@ function self.load_modules(config)
         ::continue::
     end
 
-    self.runtime.modules = modules
-    self.runtime.modules_by_tier = modules_by_tier
+    mining.runtime.modules = modules
+    mining.runtime.modules_by_tier = modules_by_tier
 end
 
-function self.load_drones(config)
+function mining.load_drones(config)
     local drone_net = component.proxy(config.mining.drone_net_address)
     local drones = {}
 
@@ -266,7 +266,7 @@ function self.load_drones(config)
     end
 
     for _, itemstack in ipairs(drone_net.getItemsInNetwork()) do
-        if itemstack.name ~= self.static.drone_name then
+        if itemstack.name ~= mining.static.drone_name then
             goto continue
         end
         drones[itemstack.damage + 1] = itemstack.size;
@@ -281,11 +281,11 @@ function self.load_drones(config)
         ::continue::
     end
 
-    self.runtime.drone_net = drone_net
-    self.runtime.drones = drones
+    mining.runtime.drone_net = drone_net
+    mining.runtime.drones = drones
 end
 
-function self.load_targets(config)
+function mining.load_targets(config)
     local targets = config.mining.targets
 
     local mandatory_targets = {}
@@ -305,39 +305,39 @@ function self.load_targets(config)
         end
     end
 
-    self.runtime.targets = targets
+    mining.runtime.targets = targets
 
-    self.runtime.mandatory_targets = mandatory_targets
-    self.runtime.maintained_targets = maintained_targets
-    self.runtime.accumulate_targets = accumulate_targets
+    mining.runtime.mandatory_targets = mandatory_targets
+    mining.runtime.maintained_targets = maintained_targets
+    mining.runtime.accumulate_targets = accumulate_targets
 end
 
-function self.load(config)
-    self.runtime.delta = config.delta
-    self.runtime.plasma_tier = config.mining.plasma_tier
+function mining.load(config)
+    mining.runtime.delta = config.delta
+    mining.runtime.plasma_tier = config.mining.plasma_tier
 
-    self.load_modules(config)
-    self.reset_all()
+    mining.load_modules(config)
+    mining.reset_all()
 
-    self.load_drones(config)
+    mining.load_drones(config)
 
-    self.runtime.storage_net = component.proxy(config.storage_net_address)
+    mining.runtime.storage_net = component.proxy(config.storage_net_address)
 
-    if not self.runtime.storage_net then
+    if not mining.runtime.storage_net then
         error("Failed to locate ME Interface from the storage subnet")
         return
     end
 
-    self.load_targets(config)
+    mining.load_targets(config)
 
-    self.load_cache()
+    mining.load_cache()
 end
 
 -- ====================== MIN-MAXING =======================
 
-function self.get_amounts()
-    local storage_net = self.runtime.storage_net
-    local targets = self.runtime.targets
+function mining.get_amounts()
+    local storage_net = mining.runtime.storage_net
+    local targets = mining.runtime.targets
 
     local amounts = {}
 
@@ -350,11 +350,11 @@ function self.get_amounts()
     return amounts
 end
 
-function self.find_optimal_configuration(amounts, modules, drones)
-    local cache = self.runtime.cache
-    local mandatory = self.runtime.mandatory_targets
-    local maintained = self.runtime.maintained_targets
-    local accumulate = self.runtime.accumulate_targets
+function mining.find_optimal_configuration(amounts, modules, drones)
+    local cache = mining.runtime.cache
+    local mandatory = mining.runtime.mandatory_targets
+    local maintained = mining.runtime.maintained_targets
+    local accumulate = mining.runtime.accumulate_targets
 
     local result = {
         is_working = false,
@@ -453,9 +453,9 @@ function self.find_optimal_configuration(amounts, modules, drones)
     return result
 end
 
-function self.plan()
-    local modules = self.runtime.modules
-    local modules_by_tier = self.runtime.modules_by_tier
+function mining.plan()
+    local modules = mining.runtime.modules
+    local modules_by_tier = mining.runtime.modules_by_tier
 
     local not_allocated = {}
 
@@ -463,13 +463,13 @@ function self.plan()
         not_allocated[tier] = #modules
     end
 
-    local virtual_amounts = self.get_amounts()
-    local virtual_drones = vector.copy(self.runtime.drones)
+    local virtual_amounts = mining.get_amounts()
+    local virtual_drones = vector.copy(mining.runtime.drones)
 
-    self.reset_all()
+    mining.reset_all()
 
     for _ = 1, #modules do
-        local config = self.find_optimal_configuration(virtual_amounts, not_allocated, virtual_drones)
+        local config = mining.find_optimal_configuration(virtual_amounts, not_allocated, virtual_drones)
 
         if not config.is_working then
             print("Nothing to do anymore")
@@ -479,7 +479,7 @@ function self.plan()
         not_allocated[config.module_tier] = not_allocated[config.module_tier] - 1
 
         local offset = #modules_by_tier[config.module_tier] - not_allocated[config.module_tier] + 1
-        self.apply(modules_by_tier[config.module_tier][offset], config)
+        mining.apply(modules_by_tier[config.module_tier][offset], config)
 
         virtual_drones[config.drone_tier] = virtual_drones[config.drone_tier] - 1
 
@@ -487,7 +487,7 @@ function self.plan()
 
         print(
             "Selected - Tier: " .. config.module_tier ..
-            " Drone: " .. self.static.voltage_names[config.drone_tier] ..
+            " Drone: " .. mining.static.voltage_names[config.drone_tier] ..
             " Distance: " .. config.distance
         )
 
@@ -495,4 +495,4 @@ function self.plan()
     end
 end
 
-return self
+return mining
