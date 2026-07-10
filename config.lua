@@ -1,12 +1,52 @@
-local self = {}
-self.mining = {}
-self.pumping = {}
+local config = {}
+config.mining = {}
+config.pumping = {}
 
-self.delta = 60
+local function single_item_get(name, meta)
+    return function (items)
+        local result = 0
+        for _, item in ipairs(items) do
+            if item.name ~= name then
+                goto continue
+            end
+            if item.damage ~= meta then
+                goto continue
+            end
+            result = item.size
+            break
+            ::continue::
+        end
+        return result
+    end
+end
 
-self.storage_net_address = "f3a8db2a-5509-4827-8c59-3feb05d1a9e7"
+local function sum_item_get(names, metas)
+    return function(items)
+        local result = 0
+        for _, item in ipairs(items) do
+            local found = false
+            for i, name in ipairs(names) do
+                if item.name == name and item.damage == metas[i] then
+                    found = true
+                    break
+                end
+            end
+            if not found then
+                goto continue
+            end
 
-self.mining = {
+            result = result + item.size
+            ::continue::
+        end
+        return result
+    end
+end
+
+config.delta = 60
+
+config.storage_net_address = "f3a8db2a-5509-4827-8c59-3feb05d1a9e7"
+
+config.mining = {
     drone_net_address = "66ed8c0f-e483-46cd-aa75-9f5385897c02",
     plasma_tier = 3,
     modules = {
@@ -26,18 +66,65 @@ self.mining = {
             transposer_address = "fb671b40-b64c-4452-9812-bed199c55fe2"
         }
     },
+    targets =
+    {
+        ["infinity_catalyst"] =
+        {
+            relative = 1,
+            get_amount = single_item_get("gregtech:gt.metaitem.01", 2394)
+        },
+        ["silicon_solar_grade"] =
+        {
+            relative = 100,
+            get_amount = single_item_get("gregtech:gt.metaitem.01", 2856)
+        },
+        -- Drills HV-EV
+        ["titanium"] =
+        {
+            to_maintain = 1000000,
+            mandatory = true,
+            get_amount = single_item_get("gregtech:gt.metaitem.01", 2028)
+        },
+        -- Drills IV-LuV
+        ["tungsten"] =
+        {
+            to_maintain = 1000000,
+            mandatory = true,
+            get_amount = single_item_get("gregtech:gt.metaitem.01", 2081)
+        },
+        -- Drills ZPM-UV
+        ["naquadah_oxide_mixture"] =
+        {
+            to_maintain = 1000000,
+            mandatory = true,
+            get_amount = sum_item_get(
+                {"bartworks:gt.bwMetaGenerateddust", "gregtech:gt.metaitem.01"},
+                {10054, 2324}
+            )
+        },
+        ["phosphorous"] =
+        {
+            to_maintain = 1000000,
+            mandatory = true,
+            get_amount = single_item_get("gregtech:gt.metaitem.01", 2021)
+        },
+        -- Drills UHV-UEV
+        ["trinium"] =
+        {
+            to_maintain = 100000,
+            mandatory = true,
+            get_amount = single_item_get("gregtech:gt.metaitem.01", 2868)
+        }
+    }
+}
+
+config.pumping = {
     targets = {
 
     }
 }
 
-self.pumping = {
-    targets = {
-
-    }
-}
-
-return self
+return config
 
 
 
