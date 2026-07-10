@@ -1,8 +1,8 @@
 local component = require("component")
 
-local self = {}
+local pumping = {}
 
-self.static = {
+pumping.static = {
     module_name = "projectmodulepumpt",
     fluids = {
         ["chlorobenzene"] =     {planet = 2, gas = 1, rate = 896000},
@@ -95,39 +95,39 @@ self.static = {
     end
 }
 
-self.runtime = {}
+pumping.runtime = {}
 
 -- ====================== MANAGE =======================
 
-function self.reset(module)
+function pumping.reset(module)
     module.proxy.setWorkAllowed(false)
 end
 
-function self.apply(module, thread, config)
+function pumping.apply(module, thread, config)
     module.proxy.setParameter("recipe" .. thread .. ".planetType", config.planet)
     module.proxy.setParameter("recipe" .. thread .. ".gasType", config.gas)
 end
 
-function self.enable(module)
+function pumping.enable(module)
     module.proxy.setWorkAllowed(true)
 end
 
-function self.reset_all()
-    for _, module in ipairs(self.runtime.modules) do
-        self.reset(module)
+function pumping.reset_all()
+    for _, module in ipairs(pumping.runtime.modules) do
+        pumping.reset(module)
     end
 end
 
-function self.enable_all()
-    for _, module in ipairs(self.runtime.modules) do
-        self.enable(module)
+function pumping.enable_all()
+    for _, module in ipairs(pumping.runtime.modules) do
+        pumping.enable(module)
     end
 end
 
 -- ====================== SETUP =======================
 
-function self.load_modules(config)
-    local threads_per_tier = self.static.threads_per_tier
+function pumping.load_modules(config)
+    local threads_per_tier = pumping.static.threads_per_tier
 
     local modules = {}
     local modules_by_tier = {{}, {}, {}}
@@ -138,7 +138,7 @@ function self.load_modules(config)
         local name = proxy.getName()
 
         for tier = 1,3 do
-            if name ~= self.static.module_name .. tier then
+            if name ~= pumping.static.module_name .. tier then
                 goto continue
             end
 
@@ -157,12 +157,12 @@ function self.load_modules(config)
         threads_by_tier[tier] = #modules * threads_per_tier[tier]
     end
 
-    self.runtime.modules = modules
-    self.runtime.modules_by_tier = modules_by_tier
-    self.runtime.threads_by_tier = threads_by_tier
+    pumping.runtime.modules = modules
+    pumping.runtime.modules_by_tier = modules_by_tier
+    pumping.runtime.threads_by_tier = threads_by_tier
 end
 
-function self.load_targets(config)
+function pumping.load_targets(config)
     local targets = config.pumping.targets
 
     local mandatory_targets = {}
@@ -182,54 +182,54 @@ function self.load_targets(config)
         end
     end
 
-    self.runtime.targets = targets
+    pumping.runtime.targets = targets
 
-    self.runtime.mandatory_targets = mandatory_targets
-    self.runtime.maintained_targets = maintained_targets
-    self.runtime.accumulate_targets = accumulate_targets
+    pumping.runtime.mandatory_targets = mandatory_targets
+    pumping.runtime.maintained_targets = maintained_targets
+    pumping.runtime.accumulate_targets = accumulate_targets
 end
 
-function self.load_cache(config)
+function pumping.load_cache(config)
     local cache = {}
 
-    for fluid, data in pairs(self.static.fluids) do
+    for fluid, data in pairs(pumping.static.fluids) do
         cache[fluid] = {}
         for tier = 1,3 do
             cache[fluid][tier] =
                 data.rate *
-                self.static.parallels_per_tier[tier] *
-                self.runtime.delta
+                pumping.static.parallels_per_tier[tier] *
+                pumping.runtime.delta
         end
     end
 
-    self.runtime.cache = cache
+    pumping.runtime.cache = cache
 end
 
-function self.load(config)
-    self.runtime.delta = config.delta
+function pumping.load(config)
+    pumping.runtime.delta = config.delta
 
-    self.runtime.storage_net = component.proxy(config.storage_net_address)
+    pumping.runtime.storage_net = component.proxy(config.storage_net_address)
 
-    if not self.runtime.storage_net then
+    if not pumping.runtime.storage_net then
         error("Failed to locate ME Interface from the storage subnet")
         return
     end
-    self.load_modules(config)
+    pumping.load_modules(config)
 
-    self.reset_all()
+    pumping.reset_all()
 
-    self.load_targets(config)
+    pumping.load_targets(config)
 
-    self.load_cache(config)
+    pumping.load_cache(config)
 end
 
 -- ====================== STORAGE =======================
 
-function self.get_amounts()
+function pumping.get_amounts()
     local amounts = {}
 
-    for fluid, target_data in pairs(self.runtime.targets) do
-        local data = self.runtime.storage_net.getFluidInNetwork(self.static.canonical_names[fluid])
+    for fluid, target_data in pairs(pumping.runtime.targets) do
+        local data = pumping.runtime.storage_net.getFluidInNetwork(pumping.static.canonical_names[fluid])
         
         local amount = 0
 
@@ -249,7 +249,7 @@ end
 
 -- ====================== PLANNING =======================
 
-function self.fix_sort(list)
+function pumping.fix_sort(list)
     if #list == 0 then
         return list
     end
@@ -263,7 +263,7 @@ function self.fix_sort(list)
 
     local i = 2
 
-    while i <= #list and self.static.comparator(list[i], first) do
+    while i <= #list and pumping.static.comparator(list[i], first) do
         list[i - 1] = list[i]
         i = i + 1
     end
@@ -273,10 +273,10 @@ function self.fix_sort(list)
     return list
 end
 
-function self.find_active_targets(amounts)
-    local mandatory = self.runtime.mandatory_targets
-    local maintained = self.runtime.maintained_targets
-    local accumulate = self.runtime.accumulate_targets
+function pumping.find_active_targets(amounts)
+    local mandatory = pumping.runtime.mandatory_targets
+    local maintained = pumping.runtime.maintained_targets
+    local accumulate = pumping.runtime.accumulate_targets
 
     local active = {}
 
@@ -303,8 +303,8 @@ function self.find_active_targets(amounts)
     return accumulate
 end
 
-function self.find_optimal_tier(fluid, deficit, unallocated_threads)
-    local rates = self.runtime.cache[fluid]
+function pumping.find_optimal_tier(fluid, deficit, unallocated_threads)
+    local rates = pumping.runtime.cache[fluid]
 
     local tier = 3
 
@@ -337,18 +337,18 @@ function self.find_optimal_tier(fluid, deficit, unallocated_threads)
     return best_tier
 end
 
-function self.plan()
-    self.reset_all()
+function pumping.plan()
+    pumping.reset_all()
 
-    local amounts = self.get_amounts()
+    local amounts = pumping.get_amounts()
 
-    local fluids = self.static.fluids
+    local fluids = pumping.static.fluids
 
-    local threads_per_tier = self.static.threads_per_tier
-    local modules_by_tier = self.runtime.modules_by_tier
-    local threads_by_tier = self.runtime.threads_by_tier
+    local threads_per_tier = pumping.static.threads_per_tier
+    local modules_by_tier = pumping.runtime.modules_by_tier
+    local threads_by_tier = pumping.runtime.threads_by_tier
 
-    local cache = self.runtime.cache
+    local cache = pumping.runtime.cache
 
     local unallocated_threads_by_tier = {}
     local allocated_threads_by_tier = {0, 0, 0}
@@ -364,7 +364,7 @@ function self.plan()
 
     while unallocated_threads_total > 0 do
         if #virtual_amounts == 0 then
-            local active_targets = self.find_active_targets(amounts)
+            local active_targets = pumping.find_active_targets(amounts)
 
             if next(active_targets) == nil then
                 break
@@ -385,12 +385,12 @@ function self.plan()
                 break
             end
 
-            table.sort(virtual_amounts, self.static.comparator)
+            table.sort(virtual_amounts, pumping.static.comparator)
         end
 
         local selected = virtual_amounts[1]
 
-        local tier = self.find_optimal_tier(
+        local tier = pumping.find_optimal_tier(
             selected.fluid,
             selected.limit - selected.amount,
             unallocated_threads_by_tier
@@ -412,7 +412,7 @@ function self.plan()
         local module_index = math.floor(allocated / threads_per_module) + 1
         local thread_index = allocated % threads_per_module + 1
 
-        self.apply(
+        pumping.apply(
             modules_by_tier[tier][module_index],
             thread_index,
             config
@@ -420,10 +420,10 @@ function self.plan()
 
         selected.amount = selected.amount + cache[selected.fluid][tier]
 
-        self.fix_sort(virtual_amounts)
+        pumping.fix_sort(virtual_amounts)
     end
 
-    self.enable_all()
+    pumping.enable_all()
 end
 
-return self
+return pumping
