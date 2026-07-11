@@ -84,15 +84,12 @@ pumping.static = {
         ["liquid_air"] = "liquidair",
         ["molten_copper"] = "molten.copper",
         ["unknown_liquid"] = "unknowwater",
-        ["distilled_water"] = "ic2distilliedwater",
+        ["distilled_water"] = "ic2distilledwater",
         ["radon"] = "radon",
         ["molten_tin"] = "molten.tin"
     },
     threads_per_tier = {1, 4, 16},
-    parallels_per_tier = {4, 16, 64},
-    comparator = function(a, b)
-        return a.amount / a.limit < b.amount / b.limit
-    end
+    parallels_per_tier = {4, 16, 64}
 }
 
 pumping.runtime = {}
@@ -101,11 +98,16 @@ pumping.runtime = {}
 
 function pumping.reset(module)
     module.proxy.setWorkAllowed(false)
+
+    for i = 1,pumping.static.threads_per_tier[module.tier] do
+        module.proxy.setParameter("recipe" .. (i - 1) .. ".planetType", 0)
+        module.proxy.setParameter("recipe" .. (i - 1) .. ".gasType", 0)
+    end
 end
 
 function pumping.apply(module, thread, config)
-    module.proxy.setParameter("recipe" .. thread .. ".planetType", config.planet)
-    module.proxy.setParameter("recipe" .. thread .. ".gasType", config.gas)
+    module.proxy.setParameter("recipe" .. (thread - 1) .. ".planetType", config.planet)
+    module.proxy.setParameter("recipe" .. (thread - 1) .. ".gasType", config.gas)
 end
 
 function pumping.enable(module)
@@ -228,42 +230,48 @@ end
 function pumping.get_amounts()
     local amounts = {}
 
-    for fluid, target_data in pairs(pumping.runtime.targets) do
-        local data = pumping.runtime.storage_net.getFluidInNetwork(pumping.static.canonical_names[fluid])
-        
-        local amount = 0
+    for fluid in pairs(pumping.runtime.targets) do
+        local data = pumping.runtime.storage_net.getFluidInNetwork(
+            pumping.static.canonical_names[fluid]
+        )
 
-        if data then
-            amount = data.amount
-        end
-        
-        table.insert(amounts, {
-            fluid = fluid,
-            amount = amount,
-            limit = target_data.limit
-        })
-        ::continue::
+        amounts[fluid] = data and data.amount or 0
     end
+
     return amounts
 end
 
 -- ====================== PLANNING =======================
 
-function pumping.fix_sort(list)
+function pumping.get_fill_ratio(fluid, amounts, is_accumulate)
+    local target = pumping.runtime.targets[fluid]
+
+    if is_accumulate and target.relative then
+        return amounts[fluid] / target.relative
+    end
+
+    return amounts[fluid] / target.to_maintain
+end
+
+function pumping.fix_sort(list, amounts, is_accumulate)
     if #list == 0 then
         return list
     end
 
     local first = list[1]
+    local target = pumping.runtime.targets[first]
 
-    if first.amount >= first.limit then
+    if not is_accumulate and amounts[first] >= target.to_maintain then
         table.remove(list, 1)
         return list
     end
 
     local i = 2
 
-    while i <= #list and pumping.static.comparator(list[i], first) do
+    while i <= #list and
+        pumping.get_fill_ratio(list[i], amounts, is_accumulate) <
+        pumping.get_fill_ratio(first, amounts, is_accumulate) do
+
         list[i - 1] = list[i]
         i = i + 1
     end
@@ -281,26 +289,30 @@ function pumping.find_active_targets(amounts)
     local active = {}
 
     for fluid, to_maintain in pairs(mandatory) do
-        if (amounts[fluid] or 0) < to_maintain then
-            active[fluid] = to_maintain
+        if amounts[fluid] < to_maintain then
+            table.insert(active, fluid)
         end
     end
 
-    if next(active) then
-        return active
+    if #active > 0 then
+        return active, false
     end
 
     for fluid, to_maintain in pairs(maintained) do
-        if (amounts[fluid] or 0) < to_maintain then
-            active[fluid] = to_maintain
+        if amounts[fluid] < to_maintain then
+            table.insert(active, fluid)
         end
     end
 
-    if next(active) then
-        return active
+    if #active > 0 then
+        return active, false
     end
 
-    return accumulate
+    for fluid, _ in pairs(accumulate) do
+        table.insert(active, fluid)
+    end
+
+    return active, true
 end
 
 function pumping.find_optimal_tier(fluid, deficit, unallocated_threads)
@@ -343,7 +355,8 @@ function pumping.plan()
     local amounts = pumping.get_amounts()
 
     local fluids = pumping.static.fluids
-
+    local targets = pumping.runtime.targets
+    
     local threads_per_tier = pumping.static.threads_per_tier
     local modules_by_tier = pumping.runtime.modules_by_tier
     local threads_by_tier = pumping.runtime.threads_by_tier
@@ -361,38 +374,47 @@ function pumping.plan()
     end
 
     local virtual_amounts = {}
+    local is_accumulate = false
+    local virtual_storage = amounts
 
     while unallocated_threads_total > 0 do
         if #virtual_amounts == 0 then
-            local active_targets = pumping.find_active_targets(amounts)
-
-            if next(active_targets) == nil then
-                break
-            end
-
-            for fluid, limit in pairs(active_targets) do
-                local current_amount = amounts[fluid] or 0
-                if current_amount < limit then
-                    table.insert(virtual_amounts, {
-                        fluid = fluid,
-                        amount = current_amount,
-                        limit = limit
-                    })
-                end
-            end
+            virtual_amounts, is_accumulate = pumping.find_active_targets(virtual_storage)
 
             if #virtual_amounts == 0 then
                 break
             end
 
-            table.sort(virtual_amounts, pumping.static.comparator)
+            table.sort(virtual_amounts, function(a, b)
+                return pumping.get_fill_ratio(a, virtual_storage, is_accumulate)
+                 < pumping.get_fill_ratio(b, virtual_storage, is_accumulate)
+            end)
         end
 
-        local selected = virtual_amounts[1]
+        local fluid = virtual_amounts[1]
+        local target = targets[fluid]
+
+        local deficit
+
+        if is_accumulate then
+            if #virtual_amounts == 1 then
+                deficit = math.huge
+            else
+                local next_fluid = virtual_amounts[2]
+
+                deficit =
+                (
+                    pumping.get_fill_ratio(next_fluid, virtual_storage, true)
+                    - pumping.get_fill_ratio(fluid, virtual_storage, true)
+                ) * target.relative
+            end
+        else
+            deficit = target.to_maintain - virtual_storage[fluid]
+        end
 
         local tier = pumping.find_optimal_tier(
-            selected.fluid,
-            selected.limit - selected.amount,
+            fluid,
+            deficit,
             unallocated_threads_by_tier
         )
 
@@ -400,10 +422,12 @@ function pumping.plan()
             break
         end
 
-        local config = fluids[selected.fluid]
+        local config = fluids[fluid]
 
-        unallocated_threads_by_tier[tier] = unallocated_threads_by_tier[tier] - 1
-        unallocated_threads_total = unallocated_threads_total - 1
+        unallocated_threads_by_tier[tier] =
+            unallocated_threads_by_tier[tier] - 1
+        unallocated_threads_total =
+            unallocated_threads_total - 1
 
         local allocated = allocated_threads_by_tier[tier]
         allocated_threads_by_tier[tier] = allocated + 1
@@ -418,12 +442,25 @@ function pumping.plan()
             config
         )
 
-        selected.amount = selected.amount + cache[selected.fluid][tier]
+        if thread_index == threads_per_module then
+            pumping.enable(modules_by_tier[tier][module_index])
+        end
 
-        pumping.fix_sort(virtual_amounts)
+        virtual_storage[fluid] =
+            virtual_storage[fluid] + cache[fluid][tier]
+
+        pumping.fix_sort(virtual_amounts, virtual_storage, is_accumulate)
     end
 
-    pumping.enable_all()
+    for tier = 1,3 do
+        local threads_per_module = threads_per_tier[tier]
+        local allocated = allocated_threads_by_tier[tier]
+
+        if allocated % threads_per_module ~= 0 then
+            local module_index = math.floor(allocated / threads_per_module) + 1
+            pumping.enable(modules_by_tier[tier][module_index])
+        end
+    end
 end
 
 return pumping
