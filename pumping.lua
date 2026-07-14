@@ -98,6 +98,7 @@ pumping.runtime = {}
 
 function pumping.reset(module)
     module.proxy.setWorkAllowed(false)
+    module.proxy.setParameter("batch", math.ceil(pumping.runtime.delta / 10))
 
     for i = 1,pumping.static.threads_per_tier[module.tier] do
         module.proxy.setParameter("recipe" .. (i - 1) .. ".planetType", 0)
